@@ -16,28 +16,28 @@ sealed class PageState<out T>:PaginationStateProvider {
 
     // 初始化时无数据刷新
     override val isInitialLoading: Boolean
-        get() = this is PageState.Loading
+        get() = this is Loading
 
     // 此时的刷新是有内容的刷新
     override val isContentRefreshing: Boolean
-        get() = this is PageState.Success.Refreshing
+        get() = this is Success.Refreshing
 
     override val isLoadingMore: Boolean
-        get() = this is PageState.Success.LoadingMore
+        get() = this is Success.LoadingMore
 
     override val canLoadMore: Boolean
-        get() = this is PageState.Success.Idle || this is PageState.Success.LoadMoreFail
+        get() = this is Success.Idle || this is Success.LoadMoreFail
 
     override val hasError: Boolean
-        get() = this is PageState.Error
+        get() = this is Error
 
     override val isLoadMoreError: Boolean
-        get() = this is PageState.Success.LoadMoreFail
+        get() = this is Success.LoadMoreFail
 
     override val isEmpty: Boolean
-        get() = this is PageState.Empty
+        get() = this is Empty
 
     override val isEndReached: Boolean
-        get() = this is PageState.Success.EndReached
+        get() = this is Success.EndReached
 
 }

@@ -1,0 +1,374 @@
+-- SQLDelight Database Schema for Subscription Management
+-- 注意：外键约束将在代码中通过AndroidSqliteDriver.Callback启用
+
+-- ============================================================================
+-- 表结构定义
+-- ============================================================================
+
+-- 设置表
+CREATE TABLE IF NOT EXISTS settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    theme TEXT NOT NULL DEFAULT 'system' CHECK (theme IN ('light', 'dark', 'system')),
+    show_original_currency INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 汇率表
+CREATE TABLE IF NOT EXISTS exchange_rates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_currency TEXT NOT NULL,
+    to_currency TEXT NOT NULL,
+    rate REAL NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(from_currency, to_currency)
+);
+
+-- 分类表
+CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    value TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 支付方式表
+CREATE TABLE IF NOT EXISTS payment_methods (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    value TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 订阅表
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    billing_cycle TEXT NOT NULL CHECK (billing_cycle IN ('monthly', 'yearly', 'quarterly')),
+    next_billing_date TEXT,
+    last_billing_date TEXT,
+    amount REAL NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    payment_method_id INTEGER NOT NULL,
+    start_date TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'cancelled')),
+    category_id INTEGER NOT NULL,
+    renewal_type TEXT NOT NULL DEFAULT 'manual' CHECK (renewal_type IN ('auto', 'manual')),
+    notes TEXT,
+    website TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE RESTRICT,
+    FOREIGN KEY (payment_method_id) REFERENCES payment_methods (id) ON DELETE RESTRICT
+);
+
+-- 支付历史表
+CREATE TABLE IF NOT EXISTS payment_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id INTEGER NOT NULL,
+    payment_date TEXT NOT NULL,
+    amount_paid REAL NOT NULL,
+    currency TEXT NOT NULL,
+    billing_period_start TEXT NOT NULL,
+    billing_period_end TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'succeeded' CHECK (status IN ('succeeded', 'failed', 'refunded')),
+    notes TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions (id) ON DELETE CASCADE
+);
+
+-- 月度分类汇总表
+CREATE TABLE IF NOT EXISTS monthly_category_summary (
+    year INTEGER NOT NULL,
+    month INTEGER NOT NULL,
+    category_id INTEGER NOT NULL,
+    total_amount_in_base_currency REAL NOT NULL DEFAULT 0.0,
+    base_currency TEXT NOT NULL DEFAULT 'CNY',
+    transactions_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (year, month, category_id),
+    FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
+);
+
+-- ============================================================================
+-- 触发器定义
+-- 移除所有触发器定义
+-- 在查询中手动设置 updated_at
+updatePaymentMethod:
+UPDATE payment_methods
+SET value = ?, label = ?, updated_at = CURRENT_TIMESTAMP
+WHERE id = ?;
+
+updateExchangeRate:
+UPDATE exchange_rates
+SET rate = ?, updated_at = CURRENT_TIMESTAMP
+WHERE from_currency = ? AND to_currency = ?;
+
+-- ============================================================================
+-- 索引定义
+-- ============================================================================
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_category_id ON subscriptions(category_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_payment_method_id ON subscriptions(payment_method_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_next_billing_date ON subscriptions(next_billing_date);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_billing_cycle ON subscriptions(billing_cycle);
+
+CREATE INDEX IF NOT EXISTS idx_categories_value ON categories(value);
+CREATE INDEX IF NOT EXISTS idx_payment_methods_value ON payment_methods(value);
+
+CREATE INDEX IF NOT EXISTS idx_payment_history_subscription_id ON payment_history(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_payment_history_payment_date ON payment_history(payment_date);
+CREATE INDEX IF NOT EXISTS idx_payment_history_billing_period ON payment_history(billing_period_start, billing_period_end);
+
+CREATE INDEX IF NOT EXISTS idx_monthly_category_summary_year_month ON monthly_category_summary(year, month);
+CREATE INDEX IF NOT EXISTS idx_monthly_category_summary_category_id ON monthly_category_summary(category_id);
+CREATE INDEX IF NOT EXISTS idx_monthly_category_summary_year_month_category ON monthly_category_summary(year, month, category_id);
+
+-- ============================================================================
+-- 查询语句定义
+-- ============================================================================
+
+-- 设置相关查询
+getSettings:
+SELECT * FROM settings WHERE id = 1;
+
+updateSettings:
+UPDATE settings
+SET currency = ?, theme = ?, show_original_currency = ?, updated_at = CURRENT_TIMESTAMP
+WHERE id = 1;
+
+-- 分类相关查询
+getAllCategories:
+SELECT * FROM categories ORDER BY label;
+
+getCategoryById:
+SELECT * FROM categories WHERE id = ?;
+
+getCategoryByValue:
+SELECT * FROM categories WHERE value = ?;
+
+insertCategory:
+INSERT INTO categories (value, label) VALUES (?, ?);
+
+updateCategory:
+UPDATE categories SET value = ?, label = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;
+
+deleteCategory:
+DELETE FROM categories WHERE id = ?;
+
+-- 支付方式相关查询
+getAllPaymentMethods:
+SELECT * FROM payment_methods ORDER BY label;
+
+getPaymentMethodById:
+SELECT * FROM payment_methods WHERE id = ?;
+
+getPaymentMethodByValue:
+SELECT * FROM payment_methods WHERE value = ?;
+
+insertPaymentMethod:
+INSERT INTO payment_methods (value, label) VALUES (?, ?);
+
+deletePaymentMethod:
+DELETE FROM payment_methods WHERE id = ?;
+
+-- 汇率相关查询
+getExchangeRate:
+SELECT * FROM exchange_rates WHERE from_currency = ? AND to_currency = ?;
+
+getAllExchangeRates:
+SELECT * FROM exchange_rates;
+
+insertOrUpdateExchangeRate:
+INSERT OR REPLACE INTO exchange_rates (
+    id,
+    from_currency,
+    to_currency,
+    rate,
+    created_at,
+    updated_at
+) VALUES (
+    (SELECT id FROM exchange_rates WHERE from_currency = ? AND to_currency = ?),
+    ?,
+    ?,
+    ?,
+    COALESCE((SELECT created_at FROM exchange_rates WHERE from_currency = ? AND to_currency = ?), CURRENT_TIMESTAMP),
+    CURRENT_TIMESTAMP
+);
+
+deleteExchangeRate:
+DELETE FROM exchange_rates WHERE from_currency = ? AND to_currency = ?;
+
+-- 订阅相关查询
+getAllSubscriptions:
+SELECT
+    s.*,
+    c.label AS category_label,
+    pm.label AS payment_method_label
+FROM subscriptions s
+JOIN categories c ON s.category_id = c.id
+JOIN payment_methods pm ON s.payment_method_id = pm.id
+ORDER BY s.name;
+
+getSubscriptionById:
+SELECT
+    s.*,
+    c.label AS category_label,
+    pm.label AS payment_method_label
+FROM subscriptions s
+JOIN categories c ON s.category_id = c.id
+JOIN payment_methods pm ON s.payment_method_id = pm.id
+WHERE s.id = ?;
+
+getActiveSubscriptions:
+SELECT
+    s.*,
+    c.label AS category_label,
+    pm.label AS payment_method_label
+FROM subscriptions s
+JOIN categories c ON s.category_id = c.id
+JOIN payment_methods pm ON s.payment_method_id = pm.id
+WHERE s.status = 'active'
+ORDER BY s.next_billing_date;
+
+getSubscriptionsByCategory:
+SELECT
+    s.*,
+    c.label AS category_label,
+    pm.label AS payment_method_label
+FROM subscriptions s
+JOIN categories c ON s.category_id = c.id
+JOIN payment_methods pm ON s.payment_method_id = pm.id
+WHERE s.category_id = ?
+ORDER BY s.name;
+
+insertSubscription:
+INSERT INTO subscriptions (
+    name, plan, billing_cycle, next_billing_date, last_billing_date,
+    amount, currency, payment_method_id, start_date, status,
+    category_id, renewal_type, notes, website
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateSubscription:
+UPDATE subscriptions
+SET name = ?, plan = ?, billing_cycle = ?, next_billing_date = ?,
+    last_billing_date = ?, amount = ?, currency = ?, payment_method_id = ?,
+    start_date = ?, status = ?, category_id = ?, renewal_type = ?,
+    notes = ?, website = ?, updated_at = CURRENT_TIMESTAMP
+WHERE id = ?;
+
+deleteSubscription:
+DELETE FROM subscriptions WHERE id = ?;
+
+-- 支付历史相关查询
+getPaymentHistoryBySubscription:
+SELECT * FROM payment_history
+WHERE subscription_id = ?
+ORDER BY payment_date DESC;
+
+getAllPaymentHistory:
+SELECT
+    ph.*,
+    s.name AS subscription_name
+FROM payment_history ph
+JOIN subscriptions s ON ph.subscription_id = s.id
+ORDER BY ph.payment_date DESC;
+
+insertPaymentHistory:
+INSERT INTO payment_history (
+    subscription_id, payment_date, amount_paid, currency,
+    billing_period_start, billing_period_end, status, notes
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+updatePaymentHistoryStatus:
+UPDATE payment_history
+SET status = ?, notes = ?
+WHERE id = ?;
+
+-- 月度汇总相关查询
+getMonthlySummary:
+SELECT
+    mcs.*,
+    c.label AS category_label
+FROM monthly_category_summary mcs
+JOIN categories c ON mcs.category_id = c.id
+WHERE mcs.year = ? AND mcs.month = ?
+ORDER BY mcs.total_amount_in_base_currency DESC;
+
+getYearlySummary:
+SELECT
+    mcs.category_id,
+    c.label AS category_label,
+    SUM(mcs.total_amount_in_base_currency) AS yearly_total,
+    SUM(mcs.transactions_count) AS yearly_transactions
+FROM monthly_category_summary mcs
+JOIN categories c ON mcs.category_id = c.id
+WHERE mcs.year = ?
+GROUP BY mcs.category_id, c.label
+ORDER BY yearly_total DESC;
+
+-- 保留 updated_at 的 upsert 版本
+upsertMonthlySummary:
+INSERT OR REPLACE INTO monthly_category_summary (
+    year,
+    month,
+    category_id,
+    total_amount_in_base_currency,
+    base_currency,
+    transactions_count,
+    updated_at
+) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);
+
+-- 简单的插入操作
+insertMonthlySummary:
+INSERT INTO monthly_category_summary (
+    year, month, category_id, total_amount_in_base_currency,
+    base_currency, transactions_count
+) VALUES (?, ?, ?, ?, ?, ?);
+
+-- 更新操作
+updateMonthlySummary:
+UPDATE monthly_category_summary
+SET
+    total_amount_in_base_currency = ?,
+    transactions_count = ?,
+    updated_at = CURRENT_TIMESTAMP
+WHERE year = ? AND month = ? AND category_id = ?;
+
+-- 删除操作
+deleteMonthlySummary:
+DELETE FROM monthly_category_summary
+WHERE year = ? AND month = ? AND category_id = ?;
+
+-- 删除某个分类的所有汇总数据
+deleteMonthlySummaryByCategory:
+DELETE FROM monthly_category_summary WHERE category_id = ?;
+
+-- 删除某年的所有汇总数据
+deleteMonthlySummaryByYear:
+DELETE FROM monthly_category_summary WHERE year = ?;
+
+
+-- 统计查询
+getTotalMonthlySpending:
+SELECT SUM(amount) AS total FROM subscriptions WHERE status = 'active' AND billing_cycle = 'monthly';
+
+getTotalYearlySpending:
+SELECT SUM(amount) AS total FROM subscriptions WHERE status = 'active' AND billing_cycle = 'yearly';
+
+getUpcomingBillings:
+SELECT
+    s.*,
+    c.label AS category_label
+FROM subscriptions s
+JOIN categories c ON s.category_id = c.id
+WHERE s.status = 'active'
+    AND s.next_billing_date IS NOT NULL
+    AND date(s.next_billing_date) <= date('now', '+7 days')
+ORDER BY s.next_billing_date;
